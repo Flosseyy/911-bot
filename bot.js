@@ -1,5 +1,5 @@
 // ============================================================
-//  911 Dispatch Bot — ElevenLabs TTS + Discord Voice
+//  911 Dispatch Bot — Google TTS + Discord Voice
 // ============================================================
 
 require('dotenv').config();
@@ -11,10 +11,10 @@ const {
   getVoiceConnection,
 } = require('@discordjs/voice');
 const mysql      = require('mysql2/promise');
+const gtts       = require('gtts');
 const fs         = require('fs');
 const path       = require('path');
 const os         = require('os');
-const https      = require('https');
 const { spawn }  = require('child_process');
 const ffmpegPath = require('ffmpeg-static');
 
@@ -23,16 +23,14 @@ const {
   TEXT_CHANNEL_ID,
   VOICE_CHANNEL_ID,
   DB_HOST, DB_PORT, DB_USER, DB_PASS, DB_NAME,
-  ELEVENLABS_API_KEY,
-  ELEVENLABS_VOICE_ID = 'EXAVITQu4vr4xnSDxMaL', // default: Bella
-  POLL_INTERVAL       = '4000',
-  VOICE_IDLE_TIMEOUT  = '30000',
+  POLL_INTERVAL      = '4000',
+  VOICE_IDLE_TIMEOUT = '30000',
 } = process.env;
 
 const PRIORITY = {
-  1: { label: 'PRIORITY 1 — EMERGENCY', color: 0xe03030, emoji: '🔴' },
-  2: { label: 'PRIORITY 2 — URGENT',    color: 0xe0a030, emoji: '🟡' },
-  3: { label: 'PRIORITY 3 — ROUTINE',   color: 0x4ab4f0, emoji: '🔵' },
+  1: { label: 'PRIORITY 1 EMERGENCY', color: 0xe03030, emoji: '🔴' },
+  2: { label: 'PRIORITY 2 URGENT',    color: 0xe0a030, emoji: '🟡' },
+  3: { label: 'PRIORITY 3 ROUTINE',   color: 0x4ab4f0, emoji: '🔵' },
 };
 
 const client = new Client({
@@ -50,46 +48,20 @@ async function initDB() {
   console.log('[DB] Connected');
 }
 
-// ── ElevenLabs TTS ───────────────────────────────────────────
+// ── Google TTS ────────────────────────────────────────────────
 function buildTTSText(call) {
   const pri    = PRIORITY[call.priority] || PRIORITY[3];
   const postal = String(call.postal).split('').join(' ');
   return `911 call. ${pri.label}. Postal ${postal}. Caller ${call.caller}. ${call.message}.`;
 }
 
-async function generateElevenLabs(text) {
+async function generateTTS(text) {
   const mp3Path = path.join(os.tmpdir(), `911_${Date.now()}.mp3`);
-
   return new Promise((resolve, reject) => {
-    const body = JSON.stringify({
-      text,
-      model_id: 'eleven_monolingual_v1',
-      voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+    new gtts(text, 'en').save(mp3Path, (err) => {
+      if (err) reject(err);
+      else resolve(mp3Path);
     });
-
-    const req = https.request({
-      hostname: 'api.elevenlabs.io',
-      path:     `/v1/text-to-speech/${ELEVENLABS_VOICE_ID}`,
-      method:   'POST',
-      headers:  {
-        'Content-Type':  'application/json',
-        'xi-api-key':    ELEVENLABS_API_KEY,
-        'Accept':        'audio/mpeg',
-      },
-    }, (res) => {
-      if (res.statusCode !== 200) {
-        reject(new Error(`ElevenLabs API returned ${res.statusCode}`));
-        return;
-      }
-      const out = fs.createWriteStream(mp3Path);
-      res.pipe(out);
-      out.on('finish', () => resolve(mp3Path));
-      out.on('error', reject);
-    });
-
-    req.on('error', reject);
-    req.write(body);
-    req.end();
   });
 }
 
@@ -121,9 +93,11 @@ async function playNext() {
   let conn = getVoiceConnection(guild.id);
   if (!conn) {
     conn = joinVoiceChannel({
-      channelId: VOICE_CHANNEL_ID, guildId: guild.id,
+      channelId:      VOICE_CHANNEL_ID,
+      guildId:        guild.id,
       adapterCreator: guild.voiceAdapterCreator,
-      selfDeaf: false, selfMute: false,
+      selfDeaf:       false,
+      selfMute:       false,
     });
     try {
       await entersState(conn, VoiceConnectionStatus.Ready, 20_000);
@@ -203,7 +177,7 @@ async function pollCalls() {
       try {
         const text    = buildTTSText(call);
         console.log('[TTS] Generating:', text);
-        const mp3Path = await generateElevenLabs(text);
+        const mp3Path = await generateTTS(text);
         console.log('[TTS] Done:', mp3Path);
         queue.push({ mp3Path });
         playNext();
