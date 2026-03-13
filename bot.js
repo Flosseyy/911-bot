@@ -87,7 +87,9 @@ async function playNext() {
   isPlaying = true;
   clearTimeout(idleTimer);
 
+  await client.guilds.fetch();
   const guild = client.guilds.cache.first();
+  console.log('[Voice] Guild:', guild ? guild.name : 'NOT FOUND');
   if (!guild) { isPlaying = false; return; }
 
   let conn = getVoiceConnection(guild.id);
